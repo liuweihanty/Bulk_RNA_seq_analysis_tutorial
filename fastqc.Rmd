@@ -1,0 +1,25 @@
+---
+title: "fastqc"
+author: "Weihan Liu"
+date: "15/10/2020"
+output: html_document
+---
+
+Install packages
+```{r}
+install.packages("fastqcr")
+library(fastqcr)
+```
+Implement fastqc
+```{r}
+fastqc(fq.dir = ".../fastq_folder", # path to the FASTQ files directory
+       qc.dir = ".../fastqc_results", # path to the folder where you want the results to be located
+       threads = 8,
+       fastqc.path = ".../FastQC/fastqc") #path to the location on your computer where fastqcr is installed
+
+```
+
+
+
+
+
