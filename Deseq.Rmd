@@ -1,0 +1,368 @@
+---
+title: ""
+author: "Weihan Liu"
+date: "06/11/2020"
+output: html_document
+---
+
+Experiment design: 2 CTRL reps and 3 CUX1 reps
+SK1: gHPRT day1   WT1
+SK2: gHPRT day2   WT2
+SK3: CUX1 day 1.1 CUX1_KD1: deleted, due to on PCA it completely overlapped with WT1
+SK4: CUX1 day 1.2 CUX1_KD2
+SK5: CUX1 day 2   CUX1_KD3
+
+
+<!-- simplified standard workflow for DESeq2: -->
+<!-- ```{r} -->
+<!-- dds <- DESeqDataSetFromMatrix(countData = cts, -->
+<!--                               colData = coldata, -->
+<!--                               design= ~ batch + condition) -->
+<!-- dds <- DESeq(dds) -->
+<!-- resultsNames(dds) # lists the coefficients -->
+<!-- res <- results(dds, name="condition_trt_vs_untrt") -->
+<!-- # or to shrink log fold changes association with condition: -->
+<!-- res <- lfcShrink(dds, coef="condition_trt_vs_untrt", type="apeglm") -->
+<!-- ``` -->
+
+
+```{r setup, include=FALSE, echo = FALSE}
+knitr::opts_chunk$set(echo = FALSE,message = FALSE, warning = FALSE)
+```
+
+##data loading and initial set up
+Load necessary libraries. 
+
+```{r}
+library(DESeq2)
+library(RColorBrewer) #for plotting
+library(pheatmap) #for plotting
+library(tidyverse)# for data wrangling
+library(rmarkdown)
+library(apeglm)
+library(edgeR)
+```
+
+
+
+
+Read in raw count matrix
+```{r,include=FALSE}
+raw_count <- read.table("/Users/weihan/Desktop/Research/Jeff_project/RNA_seq/CD34_CUX1_KD_hg19_CUX1_CASP_diff_two_seqs_merged/featurecounts.txt",header = TRUE) 
+#retain only the gene and raw count columns
+raw_count <- dplyr::select(raw_count,-c("Chr","Start","End","Strand","Length"))
+
+#rename samples
+colnames(raw_count) <- c("Gene","WT_day1","WT_day2","KD_day1","KD_day2")
+
+raw_count <- column_to_rownames(raw_count,var = "Gene")
+#write.table(raw_count,"/Users/weihan/Desktop/Research/Jeff_project/RNA_seq/CD34_CUX1_KD_hg19_CUX1_CASP_diff/data/raw_count.txt")
+
+```
+
+
+generate a cpm table
+```{r}
+cpm_tb <- cpm(as.matrix(raw_count[rowSums(raw_count) > 1,])) %>% as.data.frame()
+cpm_tb["CUX1",]
+cpm_tb["CASP",]
+
+#write.table(cpm_tb,"/Users/weihan/Desktop/Research/Jeff_project/RNA_seq/CD34_CUX1_KD_hg19_CUX1_CASP_diff_two_seqs_merged/cpm_table.txt")
+```
+
+create your metadata file
+```{r,include=FALSE}
+genotype <- c("WT","WT","KD","KD")
+day <- c("day1","day2","day1","day2")
+
+meta_data <- data.frame(genotype,day)
+
+#add sample names in a vector as row names. note that the row names in meta data need to be in the same order as the column/sample names in count matrix
+row.names(meta_data) <- c("WT_day1","WT_day2","KD_day1","KD_day2")
+meta_data$genotype <- as.factor(meta_data$genotype)
+meta_data$day <- as.factor(meta_data$day)
+meta_data$genotype <- relevel(meta_data$genotype, ref = "WT")
+
+```
+
+
+check the row names in your metadata is in the sampel order as column names in your count matrix, as this is the order DESeq2 corresponds each sample, if this returns FALSE, you need to go back and make the right order.
+```{r,include=FALSE}
+all(rownames(meta_data) == colnames(raw_count))
+```
+
+
+## DESeq2 analysis
+
+Create Deseq object 
+```{r,include=FALSE}
+dds <- DESeqDataSetFromMatrix(countData = raw_count,colData = meta_data,design = ~ day + genotype) #batch term places as the first term
+```
+
+
+Prefiltering, only retain the genes that have raw read counts larger than 10 in at least 2 samples
+```{r}
+keep <- rowSums(counts(dds) >= 30) >= 4
+dds <- dds[keep,]
+```
+
+next, normalize raw read counts. We perform normalization because there are several source of bias in raw read counts that will skew the RNA quantification
+    1.library size: samples are are sequenced deeper have more reads
+    2.gene length: longer genes have more reads aligned
+    3.outlier genes: highly expressed DE genes and highly expressed gene from PCR amplification bias will mask other genes
+Note that if we just divide raw reads by total number of reads, you cannot remove the bias from 3. So DESeq2 uses a method that adjust the #of reads based on library size and is resistant to ourlier genes.
+```{r}
+dds.norm <- estimateSizeFactors(dds) #estimate scaling factors and reaasign back to the DESeq2 object
+sizeFactors(dds.norm)   
+normalized_counts <- counts(dds.norm,normalized = TRUE) #extract the normalized counts from DESeq2 object, the count will be in DESEq's median of ratio format
+normalized_counts["CASP",]
+normalized_counts["CUX1",]
+
+#save the normalized counts
+write.table(normalized_counts,"/Users/weihan/Desktop/Research/Jeff_project/RNA_seq/CD34_CUX1_KD_hg19_CUX1_CASP_diff_two_seqs_merged/DESeq2_median_ratio_norm_counts.txt")
+```
+
+
+
+Differrential expression analysis using DESeq function
+This function performs a default analysis through the steps:
+ 1.estimation of size factors: estimateSizeFactors
+ 2.estimation of dispersion: estimateDispersions
+ 3.Negative Binomial GLM fitting and Wald statistics: nbinomWaldTest
+```{r}
+dds <- DESeq(dds)
+res <- results(dds)
+res
+
+```
+
+Log fold Shrinkage for visualization and ranking(GSEA analysis)
+```{r}
+resultsNames(dds)
+
+resLFC <- lfcShrink(dds, 
+            coef = "genotype_KD_vs_WT",
+            type = "apeglm")
+resLFC
+
+summary(resLFC)
+```
+
+Order result by FDR
+```{r}
+resOrdered <- resLFC[order(resLFC$padj),]
+#save the result table
+write.table(as.data.frame(resOrdered), file = "/Users/weihan/Desktop/Research/Jeff_project/RNA_seq/CD34_CUX1_KD_hg19_CUX1_CASP_diff_two_seqs_merged/DESeq2_LFC_shrinked_results.txt")
+```
+
+Check some basic statistics of DEGs
+```{r}
+#total number of DEGs
+sum(resLFC$padj < 0.1, na.rm=TRUE)
+#number of upregulated DEGs
+sum(resLFC$padj < 0.1 & resLFC$log2FoldChange >= 1 , na.rm=TRUE)
+#number of downregulated DEGs
+sum(resLFC$padj < 0.1 & resLFC$log2FoldChange <= -1 , na.rm=TRUE)
+
+#extract DEGs
+DEG <- resLFC %>% as.data.frame() %>% dplyr::filter(padj < 0.1 & abs(log2FoldChange) > 1)
+DEG_names <- rownames(DEG)
+```
+
+Independent hypothesis weighting could increase detectcion power for DEG, let's generate one result table using this method. Note there's no LFC shrinkage here
+```{r}
+library("IHW")
+resIHW <- results(dds, filterFun=ihw)
+summary(resIHW)
+sum(resIHW$padj < 0.1 & abs(resIHW$log2FoldChange) > 1, na.rm=TRUE)
+
+#check some basic statistics
+#total number of DEGs
+sum(resIHW$padj < 0.1, na.rm=TRUE)
+#number of upregulated DEGs
+sum(resIHW$padj < 0.1 & resIHW$log2FoldChange >= 1 , na.rm=TRUE)
+#number of downregulated DEGs
+sum(resIHW$padj < 0.1 & resIHW$log2FoldChange <= -1 , na.rm=TRUE)
+
+#extract DEGs
+DEG_IHW <- resIHW %>% as.data.frame() %>% dplyr::filter(padj < 0.1 & abs(log2FoldChange) > 1)
+
+DEG_names_IHW <- rownames(DEG_IHW)
+DEG_names_IHW_up <- dplyr::filter(DEG_IHW, log2FoldChange > 0) %>% rownames()
+DEG_names_IHW_down <- dplyr::filter(DEG_IHW, log2FoldChange < 0) %>% rownames()
+
+#check the overlap between the DEG discovered using conventional method and IHW method
+intersect(DEG_names,DEG_names_IHW) %>% length()
+
+write.table(as.data.frame(resIHW), file = "/Users/weihan/Desktop/Research/Jeff_project/RNA_seq/CD34_CUX1_KD_hg19_CUX1_CASP_diff_two_seqs_merged/DESeq2_IHW_results.txt")
+
+
+tmp <- read.table("/Users/weihan/Desktop/Research/Jeff_project/RNA_seq_integration/CD34_CUX1_KD_hg19_CUX1_CASP_diff_two_seqs_merged/DESeq2_IHW_results.txt")
+tmp %>% dplyr::filter(padj < 0.1, log2FoldChange > 1)
+```
+
+So far the result tables we have:
+1)Conventiaonal method
+    a.res
+    b.resLFC
+2).Independent hypothesis weighting method:
+    a.resIHW
+
+Visualization
+MA plot
+```{r}
+DESeq2::plotMA(resLFC,ylim=c(-2,4)) #you can specify the range of LFC here make the plot look nicer
+```
+
+
+Plot counts
+```{r}
+plotCounts(dds, gene="CUX1", intgroup="genotype")
+plotCounts(dds, gene="CASP", intgroup="genotype")
+
+plotCounts(dds, gene="CUX1", intgroup="day")
+plotCounts(dds, gene="CASP", intgroup="day")
+```
+
+variance stabilized transformation for visualization
+```{r}
+vsd <- vst(dds, blind = FALSE)
+rld <- rlog(dds, blind = FALSE)
+
+#we will use the vsd transformation for downstream analysis, create a batch removed vsd object
+vsd_batch_rm <- vsd
+assay(vsd_batch_rm) <- limma::removeBatchEffect(assay(vsd), vsd$day)
+```
+
+
+
+
+PCA plot both before and after batch removal
+```{r}
+plotPCA(vsd, "day")
+plotPCA(vsd_batch_rm, "day")
+
+plotPCA(vsd, "genotype")
+plotPCA(vsd_batch_rm, "genotype")
+```
+
+
+
+Gene level mean variance relationship
+For RNA-seq, a gene's expression variance is expected to increase with its mean expression, and we need to test of this relationship holds
+```{r}
+
+mean_counts <- apply(raw_count,1,mean) #calculate the mean for each row/gene. 1 here designates the function mean to be applied by row
+variance_counts <- apply(raw_count,1,var)#calculate the variance for each row/gene
+df <- data.frame(mean_counts,variance_counts) #create a data frame with mean and variance for each gene for plotting
+ggplot(df) +
+        geom_point(aes(x=mean_counts, y=variance_counts)) + 
+        scale_y_log10() +
+        scale_x_log10() +
+        xlab("Mean counts per gene") +
+        ylab("Variance per gene")
+```
+
+
+Gene level dispersion
+Next, plot the dispersion of the data. DESeq2 model the dispersion as Var=μ+α∗μ^2   μ is mean and α is dispersion. So dispersion is positively correlated with variance and ngatively correlated with mean.
+```{r}
+#plot dispersion estimates on the DESeq object 
+plotDispEsts(dds)
+```
+
+
+Next, we analyze for DE gene, and the analysis will be splitted into 4 comparisons
+
+examine how many DEGs here overlapped with CD34 RNA seq used in ningfei's 2018 paper 
+```{r}
+#Ningfei RNA seq
+blood_2018 <- read.table("/Users/weihan/Desktop/Research/Bulk_RNA_seq/Human_CD34_shCUX1/GSE101300_HSC_EdgeR_results.txt")
+blood_2018_DEG <- filter(blood_2018,FDR < 0.1 & abs(logFC) > 1)
+blood_2018_up_DEG <- filter(blood_2018,FDR < 0.1 & logFC > 1)
+blood_2018_down_DEG <- filter(blood_2018,FDR < 0.1 & logFC < -1)
+
+intersect(DEG_names_IHW,blood_2018_up_DEG$genes)
+intersect(DEG_names_IHW_up,blood_2018_up_DEG$genes)
+intersect(DEG_names_IHW_down,blood_2018_down_DEG$genes)
+
+```
+
+The intersection is poor, let's try the GSEA approach to compare the two experiment make Ningfei's DEGs into gene set and run GSEA analysis against this sequencing result
+```{r}
+#create a ranked gene list for the 2022 RNA seq experiment
+resIHW_Ordered <- resIHW[order(resIHW$stat,decreasing = TRUE),]
+geneList <- resIHW_Ordered$stat
+#name the vector
+names(geneList) <- rownames(resIHW_Ordered)
+#create ontology tables for up and down DEGs from blood 2018 paper
+up_DEG_2018 <- filter(blood_2018, FDR < 0.1 & logFC > 1) %>%
+        select(genes) %>% 
+        mutate(term = "blood_2018_up_DEG") %>%
+        relocate(term,.before = genes)
+
+down_DEG_2018 <- filter(blood_2018, FDR < 0.1 & logFC < -1) %>%
+        select(genes) %>% 
+        mutate(term = "blood_2018_down_DEG") %>%
+        relocate(term,.before = genes)
+
+all_DEG_2018 <- rbind(up_DEG_2018,down_DEG_2018)
+all_DEG_2018$term <- "blood_2018_all_DEG"
+
+onto_tbl_2018 <- rbind(up_DEG_2018,down_DEG_2018) %>% rbind(all_DEG_2018)
+rownames(onto_tbl_2018) <- NULL
+
+```
+
+run GSEA analysis
+```{r}
+library(clusterProfiler)
+library(enrichplot)
+gsea <- GSEA(geneList,TERM2GENE = onto_tbl_2018,pvalueCutoff = 0.1)
+
+gseaplot2(gsea, geneSetID = "blood_2018_all_DEG",base_size = 15,ES_geom = "dot",pvalue_table = TRUE)
+gseaplot2(gsea, geneSetID = "blood_2018_up_DEG",base_size = 15,ES_geom = "dot",pvalue_table = TRUE)
+gseaplot2(gsea, geneSetID = "blood_2018_down_DEG",base_size = 15,ES_geom = "dot",pvalue_table = TRUE)
+```
+
+
+
+Expression heatmap, which plot the normalized expression level of the DEGs from last chunk
+```{r}
+library(RColorBrewer)
+heat_colors <- brewer.pal(6, "YlOrRd")
+# Subset normalized counts to significant genes 
+#WT vs mut, no drug
+sig_norm_counts <- normalized_counts[DEG_names_IHW, ] %>% 
+        as.data.frame()
+# Run pheatmap
+pheatmap(sig_norm_counts, 
+         color = heat_colors, 
+         cluster_rows = T, 
+         show_rownames = F,
+         annotation = select(meta_data, c("genotype","day")), 
+         scale = "row")
+```
+
+
+Volcano plot using the enhanced volcano function, which shows fold change to adjusted p values for all genes
+For the most basic volcano plot, only a single data-frame, data-matrix, or tibble of test results is required, containing point labels, log2FC, and adjusted or unadjusted P values. The default cut-off for log2FC is >|2|; the default cut-off for P value is 10e-6.
+```{r,fig.width=3,fig.height=4}
+library(EnhancedVolcano)
+library(ggrepel)
+EnhancedVolcano(resIHW,
+    lab = NA,
+    labSize = 2,
+    pointSize = 1,
+    x = 'log2FoldChange',
+    y = 'pvalue',
+    pCutoffCol = "padj",
+    pCutoff = 0.1,
+    FCcutoff = 1,
+    title = 'CUX1 KD vs WT',
+    xlim = c(-4, 4),
+    ylim = c(0,30))
+
+```
+
+
