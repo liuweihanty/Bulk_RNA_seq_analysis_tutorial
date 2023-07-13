@@ -123,13 +123,3 @@ The steps in grey are run on the cluster, in blue are run locally on your comput
   Please see the DESeq.Rmd scripts in this folder for details. Run this step locally on your computer using RStudio. The input is the featurecounts.txt result raw count matrix from last step. This current step will generate the DEG result table and graphs(eg PCA,heatmap, volcano plot, MA plot etc.)
 
 
-
-
-## Other situations
-   * ### Single end sequencing analysis
-   
-
-   And modify the following places in the run_job.sh script <br>
-    1.At the start, instead of ``` echo $fq_F and $fq_R ```, just change to ``` echo $fq ``` <br>
-    2.Do the same thing in the bwa mem code <br>
-    3.Change the ``` -f BAMPE ``` flag in macs2 to ``` -f BAM ``` <br>
