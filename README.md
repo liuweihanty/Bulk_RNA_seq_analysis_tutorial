@@ -33,7 +33,9 @@ MMc-RS5-SK-05_S135_R2_001.fastq.gz <br>
 
 
 ## Analysis workflow
-![GitHub Logo](https://github.com/liuweihanty/ChIP_analysis_tutorial/blob/main/figures/ChIP_CnR_workflow_charts.png)
+![GitHub Logo](https://github.com/liuweihanty/Bulk_RNA_seq_analysis_tutorial/blob/main/figures/bulk_RNA_seq_analysis_workflow.png)
+
+The steps in grey are run on the cluster, in blue are run locally on your computer
 
 ## Step by step analysis
 * ### Run fastqc 
