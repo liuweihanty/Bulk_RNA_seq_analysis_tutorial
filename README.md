@@ -1,3 +1,5 @@
+Author: Weihan Liu
+
 # Table of contents <br>
  - [Introduction](#introduction)
  - [Demo data](#demo_data)
