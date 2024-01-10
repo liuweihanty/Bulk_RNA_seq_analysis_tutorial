@@ -1,27 +1,15 @@
 #!/bin/bash
-#This scrip takes the forward and reverse read fastq files of RNA seq, runs FastQC, STAR alignment, samtool filtering and featureCounts
-#the final output is a count matrix
-#USAGE: sh run_RNA_seq.sh <path to forward read fastq> <path to reverse read fastq> 
-
-#PBS -N run_RNA_seq
-#PBS -S /bin/bash
-#PBS -l walltime=24:00:00
-#PBS -l nodes=1:ppn=8
-#PBS -l mem=32gb
-#PBS -o /gpfs/data/mcnerney-lab/NGS_analysis_tutorials/RNA_seq/CD34_CUX1_KO/logs/run_RNA_seq.out
-#PBS -e /gpfs/data/mcnerney-lab/NGS_analysis_tutorials/RNA_seq/CD34_CUX1_KO/logs/run_RNA_seq.err
-
 
 #specify the input fastq files
-echo $fq_F
-echo $fq_R
-echo $project_folder
+fq_F=$1
+fq_R=$2
+project_dir=$3
 
 #specify the location of reference genome directory
-GENOME_DIR=/gpfs/data/mcnerney-lab/liuweihan/CUX1_CASP_diff_ref_transcriptome_bulk/hg19_refgenome_CUX1_CASP_diff
+GENOME_DIR=/gpfs/data/mcnerney-lab/reference_genomes_CUX1_CASP_diff/human/hg19_refgenome
 
 #specify the input GTF file
-GTF=/gpfs/data/mcnerney-lab/liuweihan/CUX1_CASP_diff_ref_transcriptome_bulk/hg19.refGene_CUX1_CASP_diff.gtf
+GTF=/gpfs/data/mcnerney-lab/reference_genomes_CUX1_CASP_diff/GTF_files/human/hg19.refGene_CUX1_CASP_diff.gtf
 
 
 #grab base name of the fastq files
@@ -36,18 +24,18 @@ cores=8
 #create all the output directories
 # The -p option means mkdir will create the whole path if it does not exist and refrain from complaining if it does exist
 
-mkdir -p $project_folder/output/STAR
-mkdir -p $project_folder/output/bigwigs
-mkdir -p $project_folder/output/featureCounts
+mkdir -p $project_dir/output/STAR
+mkdir -p $project_dir/output/bigwigs
+mkdir -p $project_dir/output/featureCounts
 
 # set up output filenames and locations
 
-align_out=$project_folder/output/STAR/${base}_
-samtools_q30_in=$project_folder/output/STAR/${base}_Aligned.sortedByCoord.out.bam
-samtools_q30_out=$project_folder/output/STAR/${base}_Aligned.sortedByCoord.out.q30.bam
+align_out=$project_dir/output/STAR/${base}_
+samtools_q30_in=$project_dir/output/STAR/${base}_Aligned.sortedByCoord.out.bam
+samtools_q30_out=$project_dir/output/STAR/${base}_Aligned.sortedByCoord.out.q30.bam
 
-bamCoverage_in=$project_folder/output/STAR/${base}_Aligned.sortedByCoord.out.q30.bam
-bamCoverage_out=$project_folder/output/STAR/${base}_Aligned.sortedByCoord.out.q30.bw
+bamCoverage_in=$project_dir/output/STAR/${base}_Aligned.sortedByCoord.out.q30.bam
+bamCoverage_out=$project_dir/output/bigwigs/${base}_Aligned.sortedByCoord.out.q30.bw
 
 
 
@@ -56,10 +44,13 @@ bamCoverage_out=$project_folder/output/STAR/${base}_Aligned.sortedByCoord.out.q3
 #genome alignment
 echo "Run STAR aligner"
 
-module load gcc/6.2.0
-module load STAR/2.6.1d
+module load gcc/11.3.0
+module load gcc/12.1.0
+module load intel/2022.2
+module load llvm/14.0.5
+module load star/2.7.10b
 
-cd $project_folder/input
+cd $project_dir/input
 
 STAR --runThreadN $cores \
     --genomeDir $GENOME_DIR \
@@ -73,8 +64,10 @@ STAR --runThreadN $cores \
 #bam filtering
 echo "Run samtools filter and index"
 
-module load gcc/6.2.0
-module load samtools/1.10
+module load gcc/12.1.0
+module load intel/2022.2
+module load llvm/14.0.5
+module load samtools/1.17
 
 samtools view -@ 8 -bh -q 30 $samtools_q30_in -o $samtools_q30_out
 samtools index $samtools_q30_out
@@ -83,24 +76,28 @@ samtools index $samtools_q30_out
 #you need deepTools for this, and deepTools could be called on as long as you loaded the correct python version, so you don't need to load deepTools separately.
 echo "generating bigwig files"
 
-module load gcc/6.2.0
-module load python/3.8.1
+module load gcc/12.1.0
+module load intel/2022.2
+module load llvm/14.0.5
+module load bedtools/2.30.0
+module load python/3.10.5
 
 bamCoverage -b $bamCoverage_in -o $bamCoverage_out
 
 #count RNA reads
 echo "Run featureCounts"
 
-module load gcc/6.2.0
-module load intel/2017
-module load subread/1.5.3
+module load gcc/12.1.0
+module load intel/2022.2
+module load llvm/14.0.5
+module load subread/2.0.5
 
 featureCounts -T 8 \
 	-a $GTF \
 	-p \
 	-t exon \
-	-o $project_folder/output/featureCounts/featurecounts.txt \
-	$project_folder/output/STAR/*.q30.bam
+	-o $project_dir/output/featureCounts/featurecounts.txt \
+	$project_dir/output/STAR/*.q30.bam
 
 
 done
